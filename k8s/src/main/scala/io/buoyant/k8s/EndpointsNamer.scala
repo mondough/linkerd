@@ -314,7 +314,12 @@ private object EndpointsNamer {
     }
 
     private[this] def getName(endpoints: v1.Endpoints) =
-      endpoints.metadata.flatMap(_.name)
+      endpoints.metadata.flatMap { meta =>
+        meta.labels match {
+          case Some(labels) => labels.get("io.gmon/routing-name").orElse(meta.name)
+          case _ => meta.name
+        }
+      }
 
     private[this] def mkSvc(endpoints: v1.Endpoints): Option[SvcCache] =
       getName(endpoints).map { name =>
