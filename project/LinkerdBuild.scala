@@ -117,6 +117,11 @@ object LinkerdBuild extends Base {
     .withTwitterLib(Deps.finagle("stats"))
     .withTests()
 
+  val telemetryCore = projectDir("telemetry/core")
+    .dependsOn(configCore)
+    .withTwitterLib(Deps.finagle("core"))
+    .withTests()
+
   val ConfigFileRE = """^(.*)\.yaml$""".r
 
   val execScriptJvmOptions =
@@ -324,19 +329,24 @@ object LinkerdBuild extends Base {
       .withTests()
       .dependsOn(Namer.core, Namerd.Iface.interpreterThrift)
 
+    val fs = projectDir("interpreter/fs")
+      .withTests()
+      .dependsOn(Namer.core, Namer.fs)
+
     val all = projectDir("interpreter")
       .settings(aggregateSettings)
-      .aggregate(namerd)
+      .aggregate(namerd, fs)
   }
 
   object Linkerd {
 
     val core = projectDir("linkerd/core")
       .dependsOn(
-        Router.core,
         configCore,
         LinkerdBuild.admin,
-        Namer.core % "compile->compile;test->test"
+        telemetryCore % "compile->compile;test->test",
+        Namer.core % "compile->compile;test->test",
+        Router.core
       )
       .withLib(Deps.jacksonCore)
       .withTests()
@@ -452,7 +462,7 @@ object LinkerdBuild extends Base {
       // Bundle is includes all of the supported features:
       .configDependsOn(Bundle)(
         Namer.consul, Namer.k8s, Namer.marathon, Namer.serversets, Namer.zkLeader,
-        Interpreter.namerd,
+        Interpreter.namerd, Interpreter.fs,
         Protocol.mux, Protocol.thrift,
         Tracer.zipkin,
         tls)
@@ -529,6 +539,7 @@ object LinkerdBuild extends Base {
 
   val interpreter = Interpreter.all
   val interpreterNamerd = Interpreter.namerd
+  val interpreterFs = Interpreter.fs
 
   val linkerd = Linkerd.all
   val linkerdBenchmark = Linkerd.Protocol.benchmark

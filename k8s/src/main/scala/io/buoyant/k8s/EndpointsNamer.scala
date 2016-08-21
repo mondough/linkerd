@@ -198,18 +198,6 @@ private object EndpointsNamer {
 
     val ports = Activity(state)
 
-    def clear(): Unit = synchronized {
-      state.sample() match {
-        case Activity.Ok(snap) =>
-          for (port <- snap.values) {
-            port() = Addr.Neg
-          }
-          state() = Activity.Pending
-
-        case _ =>
-      }
-    }
-
     def delete(name: String): Unit = synchronized {
       state.sample() match {
         case Activity.Ok(snap) =>
@@ -273,17 +261,6 @@ private object EndpointsNamer {
     private[this] val state = Var[Activity.State[Map[String, SvcCache]]](Activity.Pending)
 
     val services: Activity[Map[String, SvcCache]] = Activity(state)
-
-    def clear(): Unit = synchronized {
-      state.sample() match {
-        case Activity.Ok(snap) =>
-          for (svc <- snap.values) {
-            svc.clear()
-          }
-        case _ =>
-      }
-      state() = Activity.Pending
-    }
 
     /**
      * Initialize a namespaces of services.  The activity is updated
@@ -352,7 +329,6 @@ private object EndpointsNamer {
         state.sample() match {
           case Activity.Ok(snap) =>
             for (svc <- snap.get(name)) {
-              svc.clear()
               state() = Activity.Ok(snap - name)
             }
 
