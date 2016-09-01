@@ -106,14 +106,15 @@ object Json {
       for {
         chunk <- {
           log.trace("json reading chunk of %d bytes", bufsize)
-          val read = reader.read(bufsize)
-          read.respond {
+          val read = reader.read(bufsize).respond {
             case Return(Some(Buf.Utf8(chunk))) =>
               log.trace("json read chunk: %s", chunk)
             case Return(None) | Throw(_: Reader.ReaderDiscarded) =>
               log.trace("json read eoc")
             case Throw(e) =>
               log.warning(e, "json read error")
+          } handle {
+            case e: Throwable => None
           }
           AsyncStream.fromFuture(read).flatMap(AsyncStream.fromOption)
         }
