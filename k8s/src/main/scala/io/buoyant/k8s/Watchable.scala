@@ -95,21 +95,18 @@ private[k8s] abstract class Watchable[O <: KubeObject: TypeReference, W <: Watch
               }
             })
             val watchStream = Json.readStream[W](rsp.reader, Api.BufSize)
-            watchStream ++ // if the stream ends (k8s will kill connections after ~30m), restart it)
-              AsyncStream.fromFuture {
-                // It's safe to call lastOption here, because we're after the `++` operator, so
-                // this code will not be executed until `watchStream` has completed.
-                val currentVersion = watchStream.lastOption.map(_.flatMap(_.resourceVersion))
-                currentVersion.flatMap {
-                  case Some(version) => Future.value(_watch(Some(version)))
-                  case None =>
-                    // In this case, we want to try loading the initial information instead before watching again.
-                    restartWatches(labelSelector, fieldSelector).map {
-                      case (ws, ver) =>
-                        AsyncStream.fromSeq(ws) ++ _watch(ver)
-                    }
+            val restart = AsyncStream.fromFuture {
+              watchStream.lastOption.map(_.flatMap(_.resourceVersion)).flatMap {
+                case Some(version) => Future.value(_watch(Some(version)))
+                case None => {
+                  restartWatches(labelSelector, fieldSelector).map {
+                    case (ws, ver) =>
+                      AsyncStream.fromSeq(ws) ++ _watch(ver)
+                  }
                 }
-              }.flatten
+              }
+            }
+            watchStream ++ restart.flatten
 
           case http.Status.Gone =>
             // Gone is returned by k8s to indicate the requested resource version is too old to watch. A common scenario
@@ -129,7 +126,7 @@ private[k8s] abstract class Watchable[O <: KubeObject: TypeReference, W <: Watch
 
           case status =>
             close.set(Closable.nop)
-            log.debug(s"k8s failed to watch resource $path: ${status.code} ${status.reason}")
+            log.warning(s"k8s failed to watch resource $path: ${status.code} ${status.reason}")
             val f = Future.exception(Api.UnexpectedResponse(rsp))
             AsyncStream.fromFuture(f)
         }
