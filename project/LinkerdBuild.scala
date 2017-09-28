@@ -299,7 +299,7 @@ object LinkerdBuild extends Base {
      * to the classpath if it exists.
      */
     val execScript = (
-      """|#!/bin/sh
+      """|#!/bin/sh -ex
          |
          |jars="$0"
          |if [ -n "$NAMERD_HOME" ] && [ -d $NAMERD_HOME/plugins ]; then
@@ -546,7 +546,7 @@ object LinkerdBuild extends Base {
      * to the classpath if it exists.
      */
     val execScript = (
-      """|#!/bin/sh
+      """|#!/bin/sh -ex
          |
          |jars="$0"
          |if [ -n "$L5D_HOME" ] && [ -d $L5D_HOME/plugins ]; then
