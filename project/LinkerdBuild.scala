@@ -345,7 +345,7 @@ object LinkerdBuild extends Base {
      * to the classpath if it exists.
      */
     val execScript = (
-      """|#!/bin/sh
+      """|#!/bin/sh -ex
          |
          |jars="$0"
          |HSPREF_SETTING=$([ ! -z "$ENABLE_HSPREF" ] && echo "" || echo "-XX:+PerfDisableSharedMem")
@@ -615,7 +615,7 @@ object LinkerdBuild extends Base {
      * to the classpath if it exists.
      */
     val execScript = (
-      """|#!/bin/sh
+      """|#!/bin/sh -ex
          |
          |jars="$0"
          |HSPREF_SETTING=$([ ! -z "$ENABLE_HSPREF" ] && echo "" || echo "-XX:+PerfDisableSharedMem")
