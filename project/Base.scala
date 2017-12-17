@@ -32,7 +32,7 @@ object Base {
 class Base extends Build {
   import Base._
 
-  val headVersion = "1.3.3-monzo.2"
+  val headVersion = "1.3.3-monzo.3"
 
   object Git {
     def git(arg: String, args: String*) = Process("git" +: arg +: args)
