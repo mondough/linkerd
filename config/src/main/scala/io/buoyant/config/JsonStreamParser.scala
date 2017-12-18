@@ -46,7 +46,6 @@ class JsonStreamParser(mapper: ObjectMapper with ScalaObjectMapper) {
     val Buf.ByteArray.Owned(bytes, begin, end) = Buf.ByteArray.coerce(chunk)
     val parser = mapper.getFactory.createParser(bytes, begin, end - begin)
     val Buf.Utf8(s) = chunk
-    log.info("trying json read on: %s", s)
 
     val (obj, offsetAfter) = try {
       val v = Option(parser.readValueAs[T](implicitly[TypeReference[T]]))
@@ -58,7 +57,7 @@ class JsonStreamParser(mapper: ObjectMapper with ScalaObjectMapper) {
       parser.close()
     }
 
-    log.info("json read object: %s", obj)
+    log.trace("json read object: %s", obj)
     val leftover = chunk.slice(offsetAfter, chunk.length)
     (obj, leftover)
   }
