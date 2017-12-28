@@ -81,8 +81,11 @@ class ThriftNamerClient(
         Trace.recordBinary("namerd.client/bind.ns", namespace)
         Trace.recordBinary("namerd.client/bind.path", path.show)
 
+        log.info("watchName(%s):loop", path.show)
         val req = thrift.BindReq(tdtab, thrift.NameRef(stamp0, tpath, namespace), tclientId)
-        pending = Trace.letClear(client.bind(req)).respond {
+        pending = Trace.letClear(client.bind(req)).respond { v =>
+          log.info("watchName(%s):loop -> future satisfied: %s", path.show, v)
+        }.respond {
           case Return(thrift.Bound(stamp1, ttree, _)) =>
             bindSuccessCounter.incr()
             states() = Try(mkTree(ttree)) match {
@@ -99,7 +102,10 @@ class ThriftNamerClient(
             bindFailureCounter.incr()
             Trace.recordBinary("namerd.client/bind.fail", reason)
             if (!stopped) {
+              log.info(e, "watchName(%s):loop -> Throw(BindFailure), sleeping for server-provided backoff %s", path.show, retry.seconds)
               pending = Future.sleep(retry.seconds).onSuccess(_ => loop(stamp0, backoffs0))
+            } else {
+              log.warning(e, "watchName(%s):loop -> Throw(AddrFailure), STOPPED with server-provided backoff %s", path.show, retry.seconds)
             }
 
           case Throw(e) =>
@@ -107,7 +113,11 @@ class ThriftNamerClient(
             log.error(e, "bind %s", path.show)
             Trace.recordBinary("namerd.client/bind.exc", e.toString)
             val sleep #:: backoffs1 = backoffs0
+            log.info(e, "watchName(%s):loop -> Throw, sleeping for client backoff %s", path.show, sleep)
             pending = Future.sleep(sleep).onSuccess(_ => loop(TStamp.empty, backoffs1))
+
+          case v =>
+            log.warning("watchName(%s):loop -> hit default case! %s", path.show, v)
         }
       }
 
@@ -186,7 +196,10 @@ class ThriftNamerClient(
       def loop(stamp0: TStamp, backoffs0: Stream[Duration]): Unit = if (!stopped) {
         Trace.recordBinary("namerd.client/addr.path", idPath)
         val req = thrift.AddrReq(thrift.NameRef(stamp0, id, namespace), tclientId)
-        pending = Trace.letClear(client.addr(req)).respond {
+        log.info("watchAddr(%s):loop", idPath)
+        pending = Trace.letClear(client.addr(req)).respond { v =>
+          log.info("watchAddr(%s):loop -> future satisfied: %s", idPath, v)
+        }.respond {
           case Return(thrift.Addr(stamp1, thrift.AddrVal.Neg(_))) =>
             addr() = Addr.Neg
             Trace.record("namerd.client/addr.neg")
@@ -209,7 +222,10 @@ class ThriftNamerClient(
             addrFailureCounter.incr()
             Trace.recordBinary("namerd.client/addr.fail", msg)
             if (!stopped) {
+              log.info(e, "watchAddr(%s):loop -> Throw(AddrFailure), sleeping for server-provided backoff %s", idPath, retry.seconds)
               pending = Future.sleep(retry.seconds).onSuccess(_ => loop(stamp0, backoffs0))
+            } else {
+              log.warning(e, "watchAddr(%s):loop -> Throw(AddrFailure), STOPPED with server-provided backoff %s", idPath, retry.seconds)
             }
 
           case Throw(e) =>
@@ -217,7 +233,11 @@ class ThriftNamerClient(
             log.error(e, "addr on %s", idPath)
             Trace.recordBinary("namerd.client/addr.exc", e.getMessage)
             val sleep #:: backoffs1 = backoffs0
+            log.info(e, "watchAddr(%s):loop -> Throw, sleeping for client backoff %s", idPath, sleep)
             pending = Future.sleep(sleep).onSuccess(_ => loop(TStamp.empty, backoffs1))
+
+          case v =>
+            log.warning("watchAddr(%s):loop -> hit default case! %s", idPath, v)
         }
       }
 
