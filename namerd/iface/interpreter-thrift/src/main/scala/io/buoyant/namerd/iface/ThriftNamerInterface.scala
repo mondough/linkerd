@@ -379,7 +379,7 @@ class ThriftNamerInterface(
   interpreters: Ns => NameInterpreter,
   namers: Map[Path, Namer],
   stamper: ThriftNamerInterface.Stamper,
-  retryIn: () => Duration,
+   retryIn: () => Duration,
   capacity: Capacity,
   stats: StatsReceiver
 ) extends thrift.Namer.FutureIface {
@@ -476,6 +476,8 @@ class ThriftNamerInterface(
         Trace.recordBinary("namerd.srv/addr.path", path.show)
         Future.const(addrCache.get(path)).flatMap { addrObserver =>
           addrObserver(reqStamp)
+        }.respond { v =>
+          log.info("addr(%s):observer -> future satisfied: %s", path.show, v)
         }.transform {
           case Return((newStamp, None)) =>
             Trace.recordBinary("namerd.srv/addr.result", "neg")
@@ -497,14 +499,18 @@ class ThriftNamerInterface(
 
           case Throw(NonFatal(e)) =>
             Trace.recordBinary("namerd.srv/addr.fail", e.toString)
+            log.info("addr(%s):transformer -> throwing AddrFailure")
             log.error(e, "resolving addr %s", path.show)
             val failure = thrift.AddrFailure(e.getMessage, Int.MaxValue, ref)
             Future.exception(failure)
 
           case Throw(e) =>
             Trace.recordBinary("namerd.srv/addr.fail", e.toString)
+            log.info("addr(%s):transformer -> throwing bare exception")
             log.error(e, "resolving addr %s", path.show)
             Future.exception(e)
+        }.respond { v =>
+          log.info("addr(%s):transformed observer -> future satisfied: %s", path.show, v)
         }
     }
   }

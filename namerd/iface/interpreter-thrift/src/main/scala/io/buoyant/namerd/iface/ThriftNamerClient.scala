@@ -243,7 +243,7 @@ class ThriftNamerClient(
 
       loop(TStamp.empty, backoffs)
       Closable.make { deadline =>
-        log.debug("addr released %s", idPath)
+        log.debug("addr released %s (deadline=%s)", idPath, deadline)
         stopped = true
         pending.raise(Released)
         Future.Unit
