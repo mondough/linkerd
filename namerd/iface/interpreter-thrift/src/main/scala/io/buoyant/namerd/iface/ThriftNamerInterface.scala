@@ -417,7 +417,7 @@ class ThriftNamerInterface(
 
           case Throw(e) =>
             Trace.recordBinary("namerd.srv/bind.fail", e.toString)
-            log.error(e, "binding name %s", path.show)
+            log.error(e, "ThriftNamerInterface bind(req: %s): Throw %s, returning BindFailure", e, req, e)
             val failure = thrift.BindFailure(e.getMessage, retryIn().inSeconds, ref, ns)
             Future.exception(failure)
         }
@@ -477,7 +477,7 @@ class ThriftNamerInterface(
         Future.const(addrCache.get(path)).flatMap { addrObserver =>
           addrObserver(reqStamp)
         }.respond { v =>
-          log.info("addr(%s):observer -> future satisfied: %s", path.show, v)
+          log.info("ThriftNamerInterface addr(req: %s): addrObserver satisfied %s", req, v)
         }.transform {
           case Return((newStamp, None)) =>
             Trace.recordBinary("namerd.srv/addr.result", "neg")
@@ -499,9 +499,9 @@ class ThriftNamerInterface(
 
           case Throw(NonFatal(e)) =>
             Trace.recordBinary("namerd.srv/addr.fail", e.toString)
-            log.info("addr(%s):transformer -> throwing AddrFailure")
-            log.error(e, "resolving addr %s", path.show)
-            val failure = thrift.AddrFailure(e.getMessage, Int.MaxValue, ref)
+            val retry = retryIn()
+            log.info(e, "ThriftNamerInterface addr(req: %s): addrObserver threw NonFatal(%s), returning AddrFailure asking client to back-off %s (old \"sleep forever\" case)", req, e, retry)
+            val failure = thrift.AddrFailure(e.getMessage, retry.inSeconds, ref)
             Future.exception(failure)
 
           case Throw(e) =>
@@ -509,6 +509,11 @@ class ThriftNamerInterface(
             log.info("addr(%s):transformer -> throwing bare exception")
             log.error(e, "resolving addr %s", path.show)
             Future.exception(e)
+
+          case v =>
+            log.warning("ThriftNamerInterface addr(req: %s): addrObserver hit default case", path.show)
+            Future.exception(new IllegalStateException("unhandled ThriftNamerInterface addr case"))
+
         }.respond { v =>
           log.info("addr(%s):transformed observer -> future satisfied: %s", path.show, v)
         }

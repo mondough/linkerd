@@ -58,10 +58,12 @@ class ThriftNamerClient(
       bindCache.get(key) match {
         case Some(act) =>
           Trace.recordBinary("namerd.client/bind.cached", true)
+          log.debug("ThriftNamerClient bind(dtab: %s, path: %s): returning cached activity", dtab.show, path.show)
           act
 
         case None =>
           Trace.recordBinary("namerd.client/bind.cached", false)
+          log.debug("ThriftNamerClient bind(dtab: %s, path: %s): starting new activity", dtab.show, path.show)
           val act = watchName(dtab, path)
           bindCache += (key -> act)
           act
@@ -81,10 +83,10 @@ class ThriftNamerClient(
         Trace.recordBinary("namerd.client/bind.ns", namespace)
         Trace.recordBinary("namerd.client/bind.path", path.show)
 
-        log.info("watchName(%s):loop", path.show)
+        log.info("ThriftNamerClient watchName(dtab: %s, path: %s) loop(stamp0: %s)", tdtab, path.show, stamp0)
         val req = thrift.BindReq(tdtab, thrift.NameRef(stamp0, tpath, namespace), tclientId)
         pending = Trace.letClear(client.bind(req)).respond { v =>
-          log.info("watchName(%s):loop -> future satisfied: %s", path.show, v)
+          log.info("ThriftNamerClient watchName(dtab: %s, path: %s) loop(stamp0: %s): request satisfied: %s", tdtab, path.show, stamp0, v)
         }.respond {
           case Return(thrift.Bound(stamp1, ttree, _)) =>
             bindSuccessCounter.incr()
@@ -101,29 +103,28 @@ class ThriftNamerClient(
           case Throw(e@thrift.BindFailure(reason, retry, _, _)) =>
             bindFailureCounter.incr()
             Trace.recordBinary("namerd.client/bind.fail", reason)
-            if (!stopped) {
-              log.info(e, "watchName(%s):loop -> Throw(BindFailure), sleeping for server-provided backoff %s", path.show, retry.seconds)
-              pending = Future.sleep(retry.seconds).onSuccess(_ => loop(stamp0, backoffs0))
-            } else {
-              log.warning(e, "watchName(%s):loop -> Throw(AddrFailure), STOPPED with server-provided backoff %s", path.show, retry.seconds)
-            }
+            val sleep #:: backoffs1 = backoffs0
+            log.warning(e, "ThriftNamerClient watchName(dtab: %s, path: %s) loop(stamp0: %s): BindFailure %s, ignoring server backoff %s and using client backoff %s", tdtab, path.show, stamp0, e, retry.seconds, sleep)
+            pending = Future.sleep(sleep).onSuccess(_ => loop(TStamp.empty, backoffs1))
 
           case Throw(e) =>
             bindFailureCounter.incr()
             log.error(e, "bind %s", path.show)
             Trace.recordBinary("namerd.client/bind.exc", e.toString)
             val sleep #:: backoffs1 = backoffs0
-            log.info(e, "watchName(%s):loop -> Throw, sleeping for client backoff %s", path.show, sleep)
+            log.warning(e, "ThriftNamerClient watchName(dtab: %s, path: %s) loop(stamp0: %s): Throw %s, using client backoff %s", tdtab, path.show, stamp0, e, sleep)
             pending = Future.sleep(sleep).onSuccess(_ => loop(TStamp.empty, backoffs1))
 
           case v =>
-            log.warning("watchName(%s):loop -> hit default case! %s", path.show, v)
+            val sleep #:: backoffs1 = backoffs0
+            log.warning("ThriftNamerClient watchName(dtab: %s, path: %s) loop(stamp0: %s): hit default case with %s, using client backoff %s", tdtab, path.show, stamp0, v, sleep)
+            pending = Future.sleep(sleep).onSuccess(_ => loop(TStamp.empty, backoffs1))
         }
       }
 
       loop(TStamp.empty, backoffs)
       Closable.make { deadline =>
-        log.debug("bind released %s", path.show)
+        log.debug("bind released %s (deadline=%s)", path.show, deadline)
         stopped = true
         pending.raise(Released)
         Future.Unit
@@ -196,9 +197,10 @@ class ThriftNamerClient(
       def loop(stamp0: TStamp, backoffs0: Stream[Duration]): Unit = if (!stopped) {
         Trace.recordBinary("namerd.client/addr.path", idPath)
         val req = thrift.AddrReq(thrift.NameRef(stamp0, id, namespace), tclientId)
-        log.info("watchAddr(%s):loop", idPath)
+
+        log.info("ThriftNamerClient watchAddr(id: %s) loop(stamp0: %s)", idPath, stamp0)
         pending = Trace.letClear(client.addr(req)).respond { v =>
-          log.info("watchAddr(%s):loop -> future satisfied: %s", idPath, v)
+          log.info("ThriftNamerClient watchAddr(id: %s) loop(stamp0: %s): request satisfied %s", idPath, stamp0, v)
         }.respond {
           case Return(thrift.Addr(stamp1, thrift.AddrVal.Neg(_))) =>
             addr() = Addr.Neg
@@ -221,23 +223,22 @@ class ThriftNamerClient(
           case Throw(e@thrift.AddrFailure(msg, retry, _)) =>
             addrFailureCounter.incr()
             Trace.recordBinary("namerd.client/addr.fail", msg)
-            if (!stopped) {
-              log.info(e, "watchAddr(%s):loop -> Throw(AddrFailure), sleeping for server-provided backoff %s", idPath, retry.seconds)
-              pending = Future.sleep(retry.seconds).onSuccess(_ => loop(stamp0, backoffs0))
-            } else {
-              log.warning(e, "watchAddr(%s):loop -> Throw(AddrFailure), STOPPED with server-provided backoff %s", idPath, retry.seconds)
-            }
+            val sleep #:: backoffs1 = backoffs0
+            log.warning(e, "ThriftNamerClient watchAddr(id: %s) loop(stamp0: %s): AddrFailure %s, ignoring server backoff %s and using client backoff %s", idPath, stamp0, e, retry.seconds, sleep)
+            pending = Future.sleep(sleep).onSuccess(_ => loop(TStamp.empty, backoffs1))
 
           case Throw(e) =>
             addrFailureCounter.incr()
             log.error(e, "addr on %s", idPath)
             Trace.recordBinary("namerd.client/addr.exc", e.getMessage)
             val sleep #:: backoffs1 = backoffs0
-            log.info(e, "watchAddr(%s):loop -> Throw, sleeping for client backoff %s", idPath, sleep)
+            log.warning(e, "ThriftNamerClient watchAddr(id: %s) loop(stamp0: %s): Throw %s, using client backoff %s", idPath, stamp0, e, sleep)
             pending = Future.sleep(sleep).onSuccess(_ => loop(TStamp.empty, backoffs1))
 
           case v =>
-            log.warning("watchAddr(%s):loop -> hit default case! %s", idPath, v)
+            val sleep #:: backoffs1 = backoffs0
+            log.warning("ThriftNamerClient watchAddr(id: %s) loop(stamp0: %s): hit default case with %s, using client backoff %s", idPath, stamp0, v, sleep)
+            pending = Future.sleep(sleep).onSuccess(_ => loop(TStamp.empty, backoffs1))
         }
       }
 
