@@ -7,13 +7,17 @@ import com.twitter.finagle.stats.StatsReceiver
 import com.twitter.io.Buf
 import com.twitter.util.{NonFatal => _, _}
 import io.buoyant.grpc.runtime.{GrpcStatus, Stream}
-import io.buoyant.namer.{ConfiguredDtabNamer, Delegator, DelegateTree, Metadata}
+import io.buoyant.namer.{ConfiguredDtabNamer, DelegateTree, Delegator, Metadata}
 import io.linkerd.mesh
 import io.linkerd.mesh.Converters._
 import java.net.{InetAddress, InetSocketAddress}
+
+import com.twitter.logging.Logger
+
 import scala.util.control.{NoStackTrace, NonFatal}
 
 object Client {
+  private[this] val log = Logger.get(getClass.getName)
 
   def apply(
     root: Path,
@@ -59,7 +63,7 @@ object Client {
      */
     override def bind(dtab: Dtab, path: Path): Activity[NameTree[Name.Bound]] = {
       val open = () => interpreter.streamBoundTree(mkBindReq(root, path, dtab))
-      streamActivity(open, decodeBoundTree, backoffs, timer)
+      streamActivity(open, decodeBoundTree, backoffs, timer, logPrefix = s"bind(dtab=${dtab.show}, path=${path.show})")
     }
 
     /**
@@ -67,7 +71,7 @@ object Client {
      */
     override lazy val dtab: Activity[Dtab] = {
       val open = () => delegator.streamDtab(mkDtabReq(root))
-      streamActivity(open, decodeDtab, backoffs, timer)
+      streamActivity(open, decodeDtab, backoffs, timer, logPrefix = "dtab")
     }
 
     override def delegate(
@@ -75,14 +79,14 @@ object Client {
       tree: NameTree[Name.Path]
     ): Activity[DelegateTree[Name.Bound]] = {
       val open = () => delegator.streamDelegateTree(mkDelegateTreeReq(root, dtab, tree))
-      streamActivity(open, decodeDelegateTree, backoffs, timer)
+      streamActivity(open, decodeDelegateTree, backoffs, timer, logPrefix = s"delegate(dtab=${dtab.show}, tree:${tree.show}")
     }
 
     private[this] val resolve: Path => Var[Addr] = {
       case Path.empty => Var.value(Addr.Failed("empty"))
       case id =>
         val open = () => resolver.streamReplicas(mkReplicasReq(id))
-        streamVar(Addr.Pending, open, replicasToAddr, backoffs, timer)
+        streamVar(Addr.Pending, open, replicasToAddr, backoffs, timer, logPrefix = "resolve")
     }
 
     private[this] val fromBoundNameTree: mesh.BoundNameTree => NameTree[Name.Bound] =
@@ -115,7 +119,8 @@ object Client {
     open: () => Stream[S],
     toT: Try[S] => Option[T],
     backoffs0: scala.Stream[Duration],
-    timer: Timer
+    timer: Timer,
+    logPrefix: String = ""
   ): Var[T] = Var.async[T](init) { state =>
     implicit val timer0 = timer
 
@@ -123,7 +128,7 @@ object Client {
     // them until the state has been updated to a new value. This is
     // intended to (1) integrate tightly with flow control and more
     // importantly (2) later integrate with netty's reference counted
-    // bueffers.
+    // buffers.
     @volatile var closed = false
     def loop(
       rsps: Stream[S],
@@ -132,27 +137,33 @@ object Client {
     ): Future[Unit] =
       if (closed) releasePrior().rescue(_rescueUnit)
       else rsps.recv().transform {
-        case Throw(_) if closed =>
+        case Throw(e) if closed =>
+          log.warning(e, "mesh.Client %s streamVar loop: Throw while closed", logPrefix)
           releasePrior().rescue(_rescueUnit)
 
         case Throw(NonFatal(e)) =>
           val releasePriorNoError = () => releasePrior().rescue(_rescueUnit)
           backoffs match {
             case wait #:: moreBackoffs =>
+              log.warning(e, "mesh.Client %s streamVar loop: Throw(NonFatal), waiting %s before consuming more", wait, logPrefix)
               Future.sleep(wait).before(loop(open(), moreBackoffs, releasePriorNoError))
 
             case _ => // empty: fail
+              log.error(e, "mesh.Client %s streamVar loop: Throw(NonFatal) but backoffs are empty, will not consume more", logPrefix)
               releasePriorNoError().before(Future.exception(e))
           }
 
         case Throw(e) => // fatal
+          log.error(e, "mesh.Client %s streamVar loop: Throw(Fatal), will not retry", logPrefix)
           Future.exception(e)
 
         case Return(Stream.Releasable(s, release)) =>
           toT(Return(s)) match {
             case None =>
+              log.info("mesh.Client %s streamVar loop: Return(%s) transformed to None, releasing value before consuming more", logPrefix, s)
               release().before(loop(rsps, backoffs0, releasePrior))
             case Some(t) =>
+              log.info("mesh.Client %s streamVar loop: Return(%s) transformed to Some(%s)", logPrefix, s, t)
               state() = t
               releasePrior().before(loop(rsps, backoffs0, release))
           }
@@ -161,6 +172,7 @@ object Client {
     val f = loop(open(), backoffs0, _releaseNop)
     Closable.make { _ =>
       closed = true
+      log.info("mesh.Client %s streamVar closing", logPrefix)
       f.raise(Failure("closed", Failure.Interrupted))
       f
     }
@@ -177,7 +189,8 @@ object Client {
     open: () => Stream[S],
     toT: S => Option[T],
     bos: scala.Stream[Duration],
-    timer: Timer
+    timer: Timer,
+    logPrefix: String = ""
   ): Activity[T] = {
     val toState: Try[S] => Option[Activity.State[T]] = {
       case Throw(e) => Some(Activity.Failed(e))
@@ -187,7 +200,7 @@ object Client {
           case Some(t) => Some(Activity.Ok(t))
         }
     }
-    Activity(streamVar(Activity.Pending, open, toState, bos, timer))
+    Activity(streamVar(Activity.Pending, open, toState, bos, timer, logPrefix))
   }
 
   private[this] val decodeDtab: mesh.DtabRsp => Option[Dtab] = {

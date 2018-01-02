@@ -379,7 +379,7 @@ class ThriftNamerInterface(
   interpreters: Ns => NameInterpreter,
   namers: Map[Path, Namer],
   stamper: ThriftNamerInterface.Stamper,
-   retryIn: () => Duration,
+  retryIn: () => Duration,
   capacity: Capacity,
   stats: StatsReceiver
 ) extends thrift.Namer.FutureIface {
