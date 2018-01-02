@@ -1,11 +1,12 @@
 package io.buoyant.namerd
 package iface.mesh
 
-import com.twitter.finagle.{Addr, Dtab, Name, Namer, NameTree, Path}
+import com.twitter.finagle._
 import com.twitter.finagle.naming.NameInterpreter
 import com.twitter.finagle.stats.StatsReceiver
 import com.twitter.io.Buf
-import com.twitter.util.{Activity, Future, Return, Throw, Try, Var}
+import com.twitter.logging.Logger
+import com.twitter.util.{Try, _}
 import io.buoyant.grpc.runtime.{GrpcStatus, ServerDispatcher, Stream, VarEventStream}
 import io.buoyant.namer.{ConfiguredDtabNamer, Delegator, RichActivity}
 import io.linkerd.mesh
@@ -18,6 +19,7 @@ import io.linkerd.mesh.Converters._
  * contain a single element, used as the DtabStore's `namespace.`
  */
 object InterpreterService {
+  private[this] val log = Logger.get(getClass.getName)
 
   def apply(
     store: DtabStore,
@@ -60,7 +62,19 @@ object InterpreterService {
               case None => Dtab.empty
               case Some(d) => fromDtab(d)
             }
-            val evs = getNs(ns).bind(dtab, name).values.map(toBoundTreeRspEv)
+            val evs = getNs(ns)
+              .bind(dtab, name)
+              .values
+              .map { v =>
+                val ev = toBoundTreeRspEv(v)
+                v match {
+                  case Return(nt) =>
+                    log.info("mesh.InterpreterService streamBoundTree(dtab=%s, path=%s): sending event from nametree %s: %s", dtab.show, name.show, nt.show, ev)
+                  case Throw(e) =>
+                    log.warning(e, "mesh.InterpreterService streamBoundTree(dtab=%s, path=%s): sending event from exception %s: %s", dtab.show, name.show, e, ev)
+                }
+                ev
+              }
             VarEventStream(evs)
 
           case root => Stream.exception(Errors.InvalidRoot(root))

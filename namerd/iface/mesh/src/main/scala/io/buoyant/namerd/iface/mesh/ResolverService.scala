@@ -11,7 +11,10 @@ import io.linkerd.mesh.Converters._
 import io.buoyant.namer.{Metadata, Paths}
 import java.net.Inet6Address
 
+import com.twitter.logging.Logger
+
 object ResolverService {
+  private[this] val log = Logger.get(getClass.getName)
 
   def apply(namers: Map[Path, Namer], stats: StatsReceiver): mesh.Resolver.Server =
     new mesh.Resolver.Server(new ServerImpl(namers, stats))
@@ -25,7 +28,15 @@ object ResolverService {
 
     override def streamReplicas(req: mesh.ReplicasReq): Stream[mesh.Replicas] = req match {
       case mesh.ReplicasReq(None | Some(mesh.Path(Nil))) => Stream.value(ReplicasErrorNoId)
-      case mesh.ReplicasReq(Some(pid)) => VarEventStream(bind(pid).map(toReplicasEv))
+      case mesh.ReplicasReq(Some(pid)) => {
+        val evs = bind(pid).map { v =>
+          val path = fromPath(pid)
+          val ev = toReplicasEv(v)
+          log.info("mesh.ResolverService streamReplicas(path=%s): sending event from addr %s: %s", path.show, v, ev)
+          ev
+        }
+        VarEventStream(evs)
+      }
     }
 
     private[this] def bind(pid: mesh.Path): Var[Addr] = {
