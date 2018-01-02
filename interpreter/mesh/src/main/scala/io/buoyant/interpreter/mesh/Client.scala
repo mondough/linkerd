@@ -86,7 +86,7 @@ object Client {
       case Path.empty => Var.value(Addr.Failed("empty"))
       case id =>
         val open = () => resolver.streamReplicas(mkReplicasReq(id))
-        streamVar(Addr.Pending, open, replicasToAddr, backoffs, timer, logPrefix = "resolve")
+        streamVar(Addr.Pending, open, replicasToAddr, backoffs, timer, logPrefix = s"resolve(path=${id.show}")
     }
 
     private[this] val fromBoundNameTree: mesh.BoundNameTree => NameTree[Name.Bound] =
