@@ -31,7 +31,7 @@ Key | Default Value | Description
 dstPrefix | `/svc` | A path prefix used by [Http-specific identifiers](#http-1-1-identifiers).
 httpAccessLog | none | Sets the access log path.  If not specified, no access log is written.
 identifier | The `io.l5d.header.token` identifier | An identifier or list of identifiers.  See [Http-specific identifiers](#http-1-1-identifiers).
-loggers | A list of loggers.  See [Http-specific loggers](#http-1-1-loggers).
+loggers | none | A list of loggers.  See [Http-specific loggers](#http-1-1-loggers).
 maxChunkKB | 8 | The maximum size of an HTTP chunk.
 maxHeadersKB | 8 | The maximum size of all headers in an HTTP message.
 maxInitialLineKB | 4 | The maximum size of an initial HTTP message line.
@@ -367,6 +367,7 @@ Key  | Default Value | Description
 ---- | ------------- | -----------
 namespace | (all) | The Kubernetes namespace where the ingress resources are deployed. If not specified, Linkerd will watch all namespaces.
 ingressClassAnnotation | `linkerd` | When using [multiple ingress controllers](https://github.com/kubernetes/ingress/blob/master/docs/faq/README.md#how-do-i-run-multiple-ingress-controllers-in-the-same-cluster), Linkerd will only use the ingress resource annotated with this class.
+ignoreDefaultBackends | `false` | Identify requests only when they match an explicit ingress rule specifying a host and/or path.
 host | `localhost` | The Kubernetes master host.
 port | `8001` | The Kubernetes master port.
 

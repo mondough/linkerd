@@ -12,6 +12,7 @@ object LinkerdBuild extends Base {
 
   val Bundle = config("bundle")
   val Dcos = config("dcos") extend Bundle
+  val Jdk = config("jdk") extend Bundle
   val LowMem = config("lowmem") extend Bundle
 
   val configCore = projectDir("config")
@@ -163,7 +164,12 @@ object LinkerdBuild extends Base {
       .withLib(Deps.zkCandidate)
       .withTests()
 
-    val all = aggregateDir("namer", core, consul, curator, dnssrv, fs, k8s, istio, marathon, serversets, zkLeader)
+    val rancher = projectDir("namer/rancher")
+      .dependsOn(core)
+      .withTwitterLib(Deps.finagle("http"))
+      .withTests()
+
+    val all = aggregateDir("namer", core, consul, curator, dnssrv, fs, k8s, istio, marathon, serversets, zkLeader, rancher)
 
   }
 
@@ -346,11 +352,17 @@ object LinkerdBuild extends Base {
     val BundleProjects = Seq[ProjectReference](
       core, main, Namer.fs, Storage.inMemory, Router.http,
       Iface.controlHttp, Iface.interpreterThrift, Iface.mesh,
-      Namer.consul, Namer.k8s, Namer.marathon, Namer.serversets, Namer.zkLeader, Namer.dnssrv,
+      Namer.consul, Namer.k8s, Namer.marathon, Namer.serversets, Namer.zkLeader, Namer.dnssrv, Namer.rancher,
       Iface.mesh,
       Interpreter.perHost, Interpreter.k8s,
       Storage.etcd, Storage.inMemory, Storage.k8s, Storage.zk, Storage.consul,
       Telemetry.adminMetricsExport, Telemetry.core, Telemetry.influxdb, Telemetry.prometheus, Telemetry.recentRequests, Telemetry.statsd, Telemetry.tracelog, Telemetry.zipkin
+    )
+
+    val JdkSettings = BundleSettings ++ Seq(
+      dockerJavaImage := s"openjdk:${openJdkVersion}-jdk",
+      dockerTag := s"${version.value}-jdk",
+      assemblyJarName in assembly := s"${name.value}-${version.value}-jdk-exec"
     )
 
     val LowMemSettings = BundleSettings ++ Seq(
@@ -405,10 +417,12 @@ object LinkerdBuild extends Base {
 
     val all = aggregateDir("namerd",
         core, dcosBootstrap, main, Storage.all, Interpreter.all, Iface.all)
-      .configs(Bundle, Dcos, LowMem)
+      .configs(Bundle, Dcos, Jdk, LowMem)
       // Bundle includes all of the supported features:
       .configDependsOn(Bundle)(BundleProjects: _*)
       .settings(inConfig(Bundle)(BundleSettings))
+      .configDependsOn(Jdk)(BundleProjects: _*)
+      .settings(inConfig(Jdk)(JdkSettings))
       .configDependsOn(LowMem)(BundleProjects: _*)
       .settings(inConfig(LowMem)(LowMemSettings))
       .configDependsOn(Dcos)(dcosBootstrap)
@@ -594,7 +608,7 @@ object LinkerdBuild extends Base {
 
     val BundleProjects = Seq[ProjectReference](
       admin, core, main, configCore,
-      Namer.consul, Namer.fs, Namer.k8s, Namer.istio, Namer.marathon, Namer.serversets, Namer.zkLeader, Namer.curator, Namer.dnssrv,
+      Namer.consul, Namer.fs, Namer.k8s, Namer.istio, Namer.marathon, Namer.serversets, Namer.zkLeader, Namer.curator, Namer.dnssrv, Namer.rancher,
       Interpreter.fs, Interpreter.k8s, Interpreter.istio, Interpreter.mesh, Interpreter.namerd, Interpreter.perHost, Interpreter.subnet,
       Protocol.h2, Protocol.http, Protocol.mux, Protocol.thrift, Protocol.thriftMux,
       Announcer.serversets,
@@ -609,13 +623,21 @@ object LinkerdBuild extends Base {
       assemblyJarName in assembly := s"${name.value}-${version.value}-32b-exec"
     )
 
+    val JdkSettings = BundleSettings ++ Seq(
+      dockerJavaImage := s"openjdk:${openJdkVersion}-jdk",
+      dockerTag := s"${version.value}-jdk",
+      assemblyJarName in assembly := s"${name.value}-${version.value}-jdk-exec"
+    )
+
     val all = aggregateDir("linkerd",
         admin, configCore, core, failureAccrual, main, tls,
         Announcer.all, Namer.all, Protocol.all)
-      .configs(Bundle, LowMem)
+      .configs(Bundle, Jdk, LowMem)
       // Bundle is includes all of the supported features:
       .configDependsOn(Bundle)(BundleProjects: _*)
       .settings(inConfig(Bundle)(BundleSettings))
+      .configDependsOn(Jdk)(BundleProjects: _*)
+      .settings(inConfig(Jdk)(JdkSettings))
       .configDependsOn(LowMem)(BundleProjects: _*)
       .settings(inConfig(LowMem)(LowMemSettings))
       .settings(
@@ -693,6 +715,7 @@ object LinkerdBuild extends Base {
   val namerMarathon = Namer.marathon
   val namerServersets = Namer.serversets
   val namerZkLeader = Namer.zkLeader
+  val namerRancher = Namer.rancher
 
   val namerd = Namerd.all
   val namerdExamples = Namerd.examples

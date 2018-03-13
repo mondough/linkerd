@@ -29,7 +29,13 @@ class ConsulDtabStore(
   }
 
   override val list: Activity[Set[Ns]] = {
-    def namespace(key: String): Ns = key.stripPrefix("/").stripSuffix("/").substring(root.show.length)
+    def namespace(key: String): Option[Ns] =
+      Some(s"/$key".stripPrefix(s"${root.show}/"))
+        // "list()" might return "root" dir or nested dirs - ignore 'em all
+        .filterNot(_.isEmpty)
+        .filterNot(_.endsWith("/"))
+        // avoid awkward situations when we cannot observe listed namespace
+        .filter(namespaceIsValid)
 
     val run = Var.async[Activity.State[Set[Ns]]](Activity.Pending) { updates =>
       @volatile var running = true
@@ -46,7 +52,7 @@ class ConsulDtabStore(
           )
             .transform {
               case Return(result) =>
-                val namespaces = result.value.map(namespace).toSet
+                val namespaces = result.value.flatMap(namespace).toSet
                 updates() = Activity.Ok(namespaces)
                 cycle(result.index, backoffs0)
               case Throw(e: NotFound) =>
@@ -168,9 +174,23 @@ class ConsulDtabStore(
           ).transform {
             case Return(result) =>
               val version = Buf.Utf8(result.index.get)
-              val dtab = Dtab.read(result.value)
-              updates() = Activity.Ok(Some(VersionedDtab(dtab, version)))
+              // the raw string, not yet parsed as a dtab.
+              val rawDtab = result.value
+              // attempt to parse the string as a dtab, and update the the
+              // Activity with  the new state - either Ok if the string was
+              // parsed successfully, or Failed if an error occurred.
+              val nextState = Try {
+                Dtab.read(rawDtab)
+              } match {
+                case Return(dtab) => // dtab parsing succeeded.
+                  Activity.Ok(Some(VersionedDtab(dtab, version)))
+                case Throw(e) => // dtab parsing failed!
+                  log.error("consul ns %s dtab parsing failed: %s; dtab: '%s'", ns, e, rawDtab)
+                  Activity.Failed(e)
+              }
+              updates() = nextState
               cycle(result.index, backoffs0)
+
             case Throw(e: NotFound) =>
               updates() = Activity.Ok(None)
               cycle(e.rsp.headerMap.get(Headers.Index), backoffs0)

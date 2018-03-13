@@ -100,12 +100,13 @@ class ThriftNamerClient(
             }
             loop(stamp1, backoffs0)
 
-          case Throw(e@thrift.BindFailure(reason, retry, _, _)) =>
+          case Throw(e@thrift.BindFailure(reason, _, _, _)) =>
             bindFailureCounter.incr()
             Trace.recordBinary("namerd.client/bind.fail", reason)
-            val sleep #:: backoffs1 = backoffs0
-            log.warning(e, "ThriftNamerClient watchName(dtab: %s, path: %s) loop(stamp0: %s): BindFailure %s, ignoring server backoff %s and using client backoff %s", tdtab, path.show, stamp0, e, retry.seconds, sleep)
-            pending = Future.sleep(sleep).onSuccess(_ => loop(TStamp.empty, backoffs1))
+            if (!stopped) {
+              val sleep #:: backoffs1 = backoffs0
+              pending = Future.sleep(sleep).onSuccess(_ => loop(stamp0, backoffs1))
+            }
 
           case Throw(e) =>
             bindFailureCounter.incr()
@@ -220,12 +221,13 @@ class ThriftNamerClient(
             addr() = Addr.Bound(addrs.toSet[Address], convertMeta(boundMeta))
             loop(stamp1, backoffs0)
 
-          case Throw(e@thrift.AddrFailure(msg, retry, _)) =>
+          case Throw(e@thrift.AddrFailure(msg, _, _)) =>
             addrFailureCounter.incr()
             Trace.recordBinary("namerd.client/addr.fail", msg)
-            val sleep #:: backoffs1 = backoffs0
-            log.warning(e, "ThriftNamerClient watchAddr(id: %s) loop(stamp0: %s): AddrFailure %s, ignoring server backoff %s and using client backoff %s", idPath, stamp0, e, retry.seconds, sleep)
-            pending = Future.sleep(sleep).onSuccess(_ => loop(TStamp.empty, backoffs1))
+            if (!stopped) {
+              val sleep #:: backoffs1 = backoffs0
+              pending = Future.sleep(sleep).onSuccess(_ => loop(stamp0, backoffs1))
+            }
 
           case Throw(e) =>
             addrFailureCounter.incr()

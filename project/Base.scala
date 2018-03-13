@@ -32,7 +32,8 @@ object Base {
 class Base extends Build {
   import Base._
 
-  val headVersion = "1.3.4-monzo.6"
+  val headVersion = "1.3.6-monzo.0"
+  val openJdkVersion = "8u151"
 
   object Git {
     def git(arg: String, args: String*) = Process("git" +: arg +: args)
@@ -153,7 +154,7 @@ class Base extends Build {
     assemblyJarName in assembly := s"${name.value}-${version.value}-${configuration.value}-exec",
     docker := (docker dependsOn (assembly in configuration)).value,
     dockerEnvPrefix := "",
-    dockerJavaImage := (dockerJavaImage in Global).?(_.getOrElse("openjdk:8u131-jre")).value,
+    dockerJavaImage := (dockerJavaImage in Global).?(_.getOrElse(s"openjdk:${openJdkVersion}-jre")).value,
     dockerfile in docker := new Dockerfile {
       val envPrefix = dockerEnvPrefix.value.toUpperCase
       val home = s"/${organization.value}/${name.value}/${version.value}"

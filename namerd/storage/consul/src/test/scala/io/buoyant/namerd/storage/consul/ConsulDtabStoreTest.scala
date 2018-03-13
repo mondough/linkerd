@@ -4,15 +4,16 @@ import com.twitter.finagle.http.{Request, Response, Status}
 import com.twitter.finagle.service.Backoff
 import com.twitter.finagle.{Dtab, Path, Service}
 import com.twitter.io.Buf
-import com.twitter.util.{Activity, Duration, Future}
+import com.twitter.util._
 import io.buoyant.consul.v1.KvApi
 import io.buoyant.namerd.DtabStore.{DtabNamespaceAlreadyExistsException, DtabNamespaceInvalidException}
 import io.buoyant.namerd.{Ns, VersionedDtab}
-import io.buoyant.test.{Awaits, Exceptions, FunSuite}
+import io.buoyant.test.{ActivityValues, Awaits, Exceptions, FunSuite}
 
-class ConsulDtabStoreTest extends FunSuite with Awaits with Exceptions {
+class ConsulDtabStoreTest extends FunSuite with Awaits with Exceptions with ActivityValues {
 
-  val namespacesJson = """["namerd/dtabs/foo/bar/", "namerd/dtabs/foo/baz/"]"""
+  val namespacesJson = """["namerd/dtabs/foo", "namerd/dtabs/bar"]"""
+  val namespacesWithDirsJson = """["namerd/dtabs/", "namerd/dtabs/foo", "namerd/dtabs/bar/"]"""
   val namerdPrefix = "/namerd/dtabs"
   val constBackoff = Backoff.const(Duration.Zero)
 
@@ -42,7 +43,36 @@ class ConsulDtabStoreTest extends FunSuite with Awaits with Exceptions {
     store.list.states respond {
       state = _
     }
-    assert(state == Activity.Ok(Set("foo/bar", "foo/baz")))
+    assert(state == Activity.Ok(Set("foo", "bar")))
+  }
+
+  test("List available namespaces - when Consul KV dirs are explicit") {
+    val service = Service.mk[Request, Response] { req =>
+      val rsp = Response()
+      rsp.setContentTypeJson()
+      req.getParam("index", "") match {
+        case "" =>
+          rsp.headerMap.set("X-Consul-Index", "4")
+          rsp.content = Buf.Utf8(namespacesWithDirsJson)
+          Future.value(rsp)
+        case _ => Future.never
+
+      }
+    }
+
+    val store = new ConsulDtabStore(
+      KvApi(service, constBackoff),
+      Path.read(namerdPrefix),
+      None,
+      readConsistency = None,
+      writeConsistency = None
+    )
+
+    @volatile var state: Activity.State[Set[Ns]] = Activity.Pending
+    store.list.states respond {
+      state = _
+    }
+    assert(state == Activity.Ok(Set("foo")))
   }
 
   test("return an empty set when namespaces are absent") {
@@ -231,6 +261,38 @@ class ConsulDtabStoreTest extends FunSuite with Awaits with Exceptions {
     @volatile var state: Activity.State[Option[VersionedDtab]] = Activity.Pending
     store.observe(namespace).states respond { state = _ }
     assert(state == Activity.Ok(Some(VersionedDtab(Dtab.read(dtab), Buf.Utf8(version)))))
+  }
+
+  test("return Activity.Failed when the dtab is malformed") {
+    val namespace = "default"
+    val dtab = """lol im an invalid dtab"""
+    val expectedException = Try(Dtab.read(dtab)) match {
+      case Return(_) => fail("parsing invalid dtab should have succeeded")
+      case Throw(e) => e
+    }
+    val version = "4"
+    val service = Service.mk[Request, Response] { req =>
+      val rsp = Response()
+      rsp.setContentTypeJson()
+      rsp.headerMap.set("X-Consul-Index", version)
+      rsp.content = Buf.Utf8(dtab)
+      if (req.path.contains(namespace) && req.getParam("index", "").isEmpty) {
+        Future.value(rsp)
+      } else {
+        Future.never
+      }
+
+    }
+    val store = new ConsulDtabStore(
+      KvApi(service, constBackoff),
+      Path.read(namerdPrefix),
+      None,
+      readConsistency = None,
+      writeConsistency = None
+    )
+    @volatile var state: Activity.State[Option[VersionedDtab]] = Activity.Pending
+    store.observe(namespace).states respond { state = _ }
+    assert(state.failed.getMessage == expectedException.getMessage)
   }
 
 }

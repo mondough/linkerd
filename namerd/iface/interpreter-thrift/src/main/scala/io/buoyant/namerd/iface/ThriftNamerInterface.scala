@@ -379,7 +379,6 @@ class ThriftNamerInterface(
   interpreters: Ns => NameInterpreter,
   namers: Map[Path, Namer],
   stamper: ThriftNamerInterface.Stamper,
-  retryIn: () => Duration,
   capacity: Capacity,
   stats: StatsReceiver
 ) extends thrift.Namer.FutureIface {
@@ -400,7 +399,7 @@ class ThriftNamerInterface(
     mkPath(reqName) match {
       case Path.empty =>
         Trace.recordBinary("namerd.srv/bind.err", "empty path")
-        val failure = thrift.BindFailure("empty path", Int.MaxValue, ref, ns)
+        val failure = thrift.BindFailure("empty path", 0, ref, ns)
         Future.exception(failure)
 
       case path =>
@@ -417,8 +416,8 @@ class ThriftNamerInterface(
 
           case Throw(e) =>
             Trace.recordBinary("namerd.srv/bind.fail", e.toString)
-            log.error(e, "ThriftNamerInterface bind(req: %s): Throw %s, returning BindFailure", e, req, e)
-            val failure = thrift.BindFailure(e.getMessage, retryIn().inSeconds, ref, ns)
+            log.error(e, "binding name %s", path.show)
+            val failure = thrift.BindFailure(e.getMessage, 0, ref, ns)
             Future.exception(failure)
         }
     }
@@ -468,7 +467,7 @@ class ThriftNamerInterface(
     mkPath(reqName) match {
       case Path.empty =>
         Trace.recordBinary("namerd.srv/addr.err", "empty path")
-        val failure = thrift.AddrFailure("empty path", Int.MaxValue, ref)
+        val failure = thrift.AddrFailure("empty path", 0, ref)
         Future.exception(failure)
 
       case fullPath =>
@@ -499,9 +498,8 @@ class ThriftNamerInterface(
 
           case Throw(NonFatal(e)) =>
             Trace.recordBinary("namerd.srv/addr.fail", e.toString)
-            val retry = retryIn()
-            log.info(e, "ThriftNamerInterface addr(req: %s): addrObserver threw NonFatal(%s), returning AddrFailure asking client to back-off %s (old \"sleep forever\" case)", req, e, retry)
-            val failure = thrift.AddrFailure(e.getMessage, retry.inSeconds, ref)
+            log.error(e, "resolving addr %s", path.show)
+            val failure = thrift.AddrFailure(e.getMessage, 0, ref)
             Future.exception(failure)
 
           case Throw(e) =>
